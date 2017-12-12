@@ -1,36 +1,24 @@
 extern crate systray;
 use std::{thread, time};
 use systray::SystrayEvent;
-use std::sync::mpsc::{channel,Sender};
-fn get_reciver() -> Result<Sender<SystrayEvent>,String> {
-    let (event_tx, event_rx) = channel();
-    let event_tx_clone = event_tx.clone();
+use std::sync::mpsc::{channel,Sender,Receiver};
+
+pub enum ControlEvent{
+    ShowIcon,
+    HideIcon
+}
+
+fn create_tray(control_recviver:Receiver<ControlEvent>,tray_event_sender:Sender<SystrayEvent>) -> Result<(),String> {
     thread::spawn(move || {
         let mut tray;
-        match systray::Application::new(event_tx_clone) {
+        match systray::Application::new(tray_event_sender) {
             Ok(w) => tray = w,
             Err(_) => panic!("Can't create window!")
         }
         tray.set_icon_from_file("./resources/rust.ico".to_string()).ok();
-        tray.add_menu_item(&"Print a thing".to_string(), |_| {
-            println!("Printing a thing!");
-        }).ok();
-        tray.add_menu_item(&"Add Menu Item".to_string(), |window| {
-            window.add_menu_item(&"Interior item".to_string(), |_| {
-                println!("what");
-            }).ok();
-            window.add_menu_separator().ok();
-        }).ok();
-        tray.add_menu_separator().ok();
-        tray.add_menu_item(&"Quit".to_string(), |window| {
-            window.quit();
-        }).ok();
-        let _ = tray.set_tooltip(&"test tips".to_string());
-
         loop {
-            println!("in loop");
             let msg;
-            match event_rx.recv() {
+            match control_recviver.recv() {
                 Ok(m) => msg = m,
                 Err(e) => {
                     println!("get a err of tray {:?}",e);
@@ -38,36 +26,67 @@ fn get_reciver() -> Result<Sender<SystrayEvent>,String> {
                 }
             }
             match msg {
-                SystrayEvent::ShowIcon =>{
+                ControlEvent::ShowIcon =>{
                     let _ = tray.show_icon().map_err(|e|{
                         println!("show icon err {:?}",e);
                     });
                     println!("i should show the icon");
                 }
-                SystrayEvent::HideIcon =>{
+                ControlEvent::HideIcon =>{
                     let _ = tray.hide_icon().map_err(|e|{
                         println!("hide icon err {:?}",e);
                     });
                     println!("i should hide the icon");
                 }
-                SystrayEvent::LeftButtonClick =>{
-                    println!("recv LeftButtonClick");
-                }
-                SystrayEvent::MenuItemClick(menu_index) =>{
-                    println!("recv MenuItemClick {}",menu_index);
-                }
             }
         }
     });
-    return Ok(event_tx.clone());
+    Ok(())
 }
 
 fn main() {
-    let sender = get_reciver().unwrap();
+    let tray = TxTray::new();
     loop {
-        thread::sleep(time::Duration::from_secs(3));
-        let _ = sender.send(SystrayEvent::ShowIcon);
-        thread::sleep(time::Duration::from_secs(3));
-        let _ = sender.send(SystrayEvent::HideIcon);
+        thread::sleep(time::Duration::from_secs(13));
+        let _ = tray.show();
+        thread::sleep(time::Duration::from_secs(13));
+        let _ = tray.hide();
+    }
+}
+#[derive(Debug)]
+struct TxTray {
+    control_sender:Sender<ControlEvent>
+}
+impl TxTray {
+    pub fn new() -> TxTray {
+        let (control_sender,control_recviver) = channel();
+        let (tray_sender,tray_recviver) = channel();
+        create_tray(control_recviver,tray_sender);
+        thread::spawn(move|| {
+            loop {
+                match tray_recviver.recv() {
+                    Ok(m) => {
+                        match m {
+                            SystrayEvent::LeftButtonClick => {
+                                println!("left button click");
+                            },
+                            SystrayEvent::MenuItemClick(menu_index) => {
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        println!("txtray get a err of tray {:?}",e);
+                    }
+                }
+            }
+        });
+        TxTray{control_sender:control_sender}
+    }
+
+    pub fn show(&self){
+        self.control_sender.send(ControlEvent::ShowIcon);
+    }
+    pub fn hide(&self){
+        self.control_sender.send(ControlEvent::HideIcon);
     }
 }

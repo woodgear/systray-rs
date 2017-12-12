@@ -30,11 +30,9 @@ pub enum SystrayError {
     ShowIconWithoutSetError,
 }
 
-pub enum SystrayEvent {
+pub enum SystrayEvent{
     MenuItemClick(u32),
     LeftButtonClick,
-    ShowIcon,
-    HideIcon
 }
 
 impl std::fmt::Display for SystrayError {
