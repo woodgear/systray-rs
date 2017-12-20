@@ -16,7 +16,6 @@ use winapi::winnt::{LPCWSTR};
 use winapi::minwindef::{DWORD, WPARAM, LPARAM, LRESULT, HINSTANCE, TRUE, PBYTE};
 use winapi::winuser::{WNDCLASSW, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, LR_DEFAULTCOLOR};
 
-
 // Got this idea from glutin. Yay open source! Boo stupid winproc! Even more boo
 // doing SetLongPtr tho.
 thread_local!(static WININFO_STASH: RefCell<Option<WindowsLoopData>> = RefCell::new(None));
@@ -338,31 +337,41 @@ impl Window {
         Ok(())
     }
 
-    fn set_icon(&self, icon: HICON) -> Result<(), SystrayError> {
+    fn add_icon(&self,icon: HICON) -> Result<(), SystrayError> {
         unsafe {
             let mut nid = get_nid_struct(&self.info.hwnd);
             nid.uID = 0x1;
             nid.uFlags = winapi::NIF_MESSAGE;
             nid.hIcon = icon;
             nid.uCallbackMessage = winapi::WM_USER + 1;
+
             if Shell_NotifyIconW(winapi::NIM_ADD,
                                         &mut nid as *mut NOTIFYICONDATAW) == 0 {
-                return Err(get_win_os_error("Error adding menu icon"));
+                return Err(get_win_os_error("Error adding menu icon add "));
             }
+
             nid.uFlags = winapi::NIF_ICON;
             nid.hIcon = icon;
+            nid.uCallbackMessage = winapi::WM_USER + 1;
+
             if Shell_NotifyIconW(winapi::NIM_MODIFY,
                                         &mut nid as *mut NOTIFYICONDATAW) == 0 {
-                return Err(get_win_os_error("Error setting icon"));
+                return Err(get_win_os_error("Error adding menu icon modify"));
             }
         }
         Ok(())
+    }
+
+    fn set_icon(&self, icon: HICON) -> Result<(), SystrayError> {
+        let _ = self.delete_icon();
+        self.add_icon(icon)
     }
 
     pub fn delete_icon(&self) -> Result<(), SystrayError> {
         unsafe {
             let mut nid = get_nid_struct(&self.info.hwnd);
             nid.uFlags = winapi::NIF_ICON;
+
             if Shell_NotifyIconW(winapi::NIM_DELETE,
                                           &mut nid as *mut NOTIFYICONDATAW) == 0 {
                 return Err(get_win_os_error("Error deleting icon from menu"));
@@ -436,15 +445,7 @@ impl Window {
     }
 
     pub fn shutdown(&self) -> Result<(), SystrayError> {
-        unsafe {
-            let mut nid = get_nid_struct(&self.info.hwnd);
-            nid.uFlags = winapi::NIF_ICON;
-            if Shell_NotifyIconW(winapi::NIM_DELETE,
-                                          &mut nid as *mut NOTIFYICONDATAW) == 0 {
-                return Err(get_win_os_error("Error deleting icon from menu"));
-            }
-        }
-        Ok(())
+        self.delete_icon()
     }
 }
 

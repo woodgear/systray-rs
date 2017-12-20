@@ -46,10 +46,23 @@ impl std::fmt::Display for SystrayError {
         }
     }
 }
-#[derive(Debug)]
-pub enum TrayIcon {
+
+#[derive(Clone,Debug,PartialEq)]
+pub enum IconResource {
     File(String),
     Resource(String),
+}
+
+#[derive(Clone,PartialEq)]
+pub enum IconStatus {
+    SHOW,
+    HIDE,
+}
+
+#[derive(Clone)]
+pub struct TrayIcon {
+    pub status: IconStatus,
+    pub resource: IconResource
 }
 
 pub struct Application {
@@ -99,37 +112,46 @@ impl Application {
         Ok(idx)
     }
 
-    pub fn hide_icon(&self) -> Result<(), SystrayError> {
-        self.window.delete_icon()
-    }
-
-    pub fn set_icon(&mut self, icon: TrayIcon) -> Result<(), SystrayError> {
-        self.icon = Some(icon);
+    pub fn hide_icon(&mut self) -> Result<(), SystrayError> {
+        self.window.delete_icon()?;
+        if let Some(ref mut icon) = self.icon {
+            icon.status = IconStatus::HIDE;
+        };
         Ok(())
     }
 
-    pub fn show_icon(&self) -> Result<(), SystrayError> {
+    pub fn show_icon(&mut self,icon:IconResource) -> Result<(), SystrayError> {
         match self.icon {
-            Some(TrayIcon::File(ref icon)) => self.window.set_icon_from_file(&icon),
-            Some(TrayIcon::Resource(ref icon)) => self.window.set_icon_from_resource(&icon),
+            Some(ref mut exist_icon) => {
+                if exist_icon.status == IconStatus::HIDE || exist_icon.resource != icon {
+                    match icon.clone() {
+                        IconResource::File(f) => {
+                            self.window.set_icon_from_file(&f.clone())?;
+                        }
+                        IconResource::Resource(r) => {
+                            self.window.set_icon_from_resource(&r.clone())?;
+                        }
+                    }
+
+                    exist_icon.status = IconStatus::SHOW;
+                }
+            },
             None => {
-                return Err(SystrayError::ShowIconWithoutSetError)
+                match icon.clone() {
+                    IconResource::File(f) => {
+                        self.window.set_icon_from_file(&f.clone())?;
+                    }
+                    IconResource::Resource(r) => {
+                        self.window.set_icon_from_resource(&r.clone())?;
+                    }
+                }
+                self.icon = Some(TrayIcon {
+                    resource:icon.clone(),
+                    status:IconStatus::SHOW
+                })
             }
-        }
-    }
-
-    pub fn set_icon_from_file(&mut self, file: String) -> Result<(), SystrayError> {
-        self.icon = Some(TrayIcon::File(file));
+        };
         Ok(())
-    }
-
-    pub fn set_icon_from_resource(&mut self, resource: String) -> Result<(), SystrayError> {
-        self.icon =Some(TrayIcon::Resource(resource));
-        Ok(())
-    }
-
-    pub fn shutdown(&self) -> Result<(), SystrayError> {
-        self.window.delete_icon()
     }
 
     pub fn set_tooltip(&self, tooltip: &String) -> Result<(), SystrayError> {
@@ -137,12 +159,13 @@ impl Application {
     }
 
     pub fn quit(&mut self) {
+        let _ = self.hide_icon();
         self.window.quit()
     }
 }
 
 impl Drop for Application {
     fn drop(&mut self) {
-        self.shutdown().ok();
+        self.quit();
     }
 }

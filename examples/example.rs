@@ -1,6 +1,6 @@
 extern crate systray;
 use std::{thread, time};
-use systray::SystrayEvent;
+use systray::{SystrayEvent,IconResource};
 use std::sync::mpsc::{channel,Sender,Receiver};
 
 pub enum ControlEvent{
@@ -15,7 +15,6 @@ fn create_tray(control_recviver:Receiver<ControlEvent>,tray_event_sender:Sender<
             Ok(w) => tray = w,
             Err(_) => panic!("Can't create window!")
         }
-        tray.set_icon_from_file("./resources/rust.ico".to_string()).ok();
         loop {
             let msg;
             match control_recviver.recv() {
@@ -27,7 +26,7 @@ fn create_tray(control_recviver:Receiver<ControlEvent>,tray_event_sender:Sender<
             }
             match msg {
                 ControlEvent::ShowIcon =>{
-                    let _ = tray.show_icon().map_err(|e|{
+                    let _ = tray.show_icon(IconResource::File("./rust.ico".to_string())).map_err(|e|{
                         println!("show icon err {:?}",e);
                     });
                     println!("i should show the icon");
@@ -44,21 +43,14 @@ fn create_tray(control_recviver:Receiver<ControlEvent>,tray_event_sender:Sender<
     Ok(())
 }
 
-fn main() {
-    let tray = TxTray::new();
-    loop {
-        thread::sleep(time::Duration::from_secs(13));
-        let _ = tray.show();
-        thread::sleep(time::Duration::from_secs(13));
-        let _ = tray.hide();
-    }
-}
 #[derive(Debug)]
-struct TxTray {
+pub struct TTray {
     control_sender:Sender<ControlEvent>
 }
-impl TxTray {
-    pub fn new() -> TxTray {
+unsafe impl Sync for TTray {}
+
+impl TTray {
+    pub fn new() -> TTray {
         let (control_sender,control_recviver) = channel();
         let (tray_sender,tray_recviver) = channel();
         create_tray(control_recviver,tray_sender);
@@ -75,12 +67,12 @@ impl TxTray {
                         }
                     },
                     Err(e) => {
-                        println!("txtray get a err of tray {:?}",e);
+                        println!("TTray get a err of tray {:?}",e);
                     }
                 }
             }
         });
-        TxTray{control_sender:control_sender}
+        TTray{control_sender:control_sender}
     }
 
     pub fn show(&self){
@@ -89,4 +81,20 @@ impl TxTray {
     pub fn hide(&self){
         self.control_sender.send(ControlEvent::HideIcon);
     }
+}
+
+fn main() {
+    let tray = TTray::new();
+    loop {
+        tray.show();
+        thread::sleep(time::Duration::from_secs(5));
+        tray.show();
+        thread::sleep(time::Duration::from_secs(5));
+        tray.hide();
+        thread::sleep(time::Duration::from_secs(5));
+        tray.hide();
+        thread::sleep(time::Duration::from_secs(5));
+
+    }
+
 }
