@@ -16,7 +16,6 @@ use winapi::winnt::{LPCWSTR};
 use winapi::minwindef::{DWORD, WPARAM, LPARAM, LRESULT, HINSTANCE, TRUE, PBYTE};
 use winapi::winuser::{WNDCLASSW, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, LR_DEFAULTCOLOR};
 
-
 // Got this idea from glutin. Yay open source! Boo stupid winproc! Even more boo
 // doing SetLongPtr tho.
 thread_local!(static WININFO_STASH: RefCell<Option<WindowsLoopData>> = RefCell::new(None));
@@ -58,17 +57,25 @@ unsafe extern "system" fn window_proc(h_wnd :HWND,
                 let menu_id = GetMenuItemID(stash.info.hmenu,
                                             w_param as i32) as i32;
                 if menu_id != -1 {
-                    stash.tx.send(SystrayEvent {
-                        menu_index: menu_id as u32,
-                    }).ok();
+                    stash.tx.send(SystrayEvent::MenuItemClick(menu_id as u32))
+                    .ok();
                 }
             }
         });
     }
 
     if msg == winapi::winuser::WM_USER + 1 {
-        if l_param as UINT == winapi::winuser::WM_LBUTTONUP ||
-            l_param as UINT == winapi::winuser::WM_RBUTTONUP {
+        if l_param as UINT == winapi::winuser::WM_LBUTTONUP {
+            WININFO_STASH.with(|stash| {
+                let stash = stash.borrow();
+                let stash = stash.as_ref();
+                if let Some(stash) = stash {
+                    stash.tx.send(SystrayEvent::LeftButtonClick).ok();
+                }
+            });
+            return 0;
+        }
+        if  l_param as UINT == winapi::winuser::WM_RBUTTONUP {
                 let mut p = winapi::POINT {
                     x: 0,
                     y: 0
@@ -141,7 +148,7 @@ fn get_menu_item_struct() -> MENUITEMINFOW {
 }
 
 unsafe fn init_window() -> Result<WindowInfo, SystrayError> {
-    let class_name = to_wstring("my_window");
+    let class_name = to_wstring("my_tray_window");
     let hinstance : HINSTANCE = kernel32::GetModuleHandleA(std::ptr::null_mut());
     let wnd = WNDCLASSW {
         style: 0,
@@ -174,14 +181,6 @@ unsafe fn init_window() -> Result<WindowInfo, SystrayError> {
                                        std::ptr::null_mut());
     if hwnd == std::ptr::null_mut() {
         return Err(get_win_os_error("Error creating window"));
-    }
-    let mut nid = get_nid_struct(&hwnd);
-    nid.uID = 0x1;
-    nid.uFlags = winapi::NIF_MESSAGE;
-    nid.uCallbackMessage = winapi::WM_USER + 1;
-    if Shell_NotifyIconW(winapi::NIM_ADD,
-                                  &mut nid as *mut NOTIFYICONDATAW) == 0 {
-        return Err(get_win_os_error("Error adding menu icon"));
     }
     // Setup menu
     let hmenu = user32::CreatePopupMenu();
@@ -283,7 +282,6 @@ impl Window {
         }
     }
 
-
     pub fn set_tooltip(&self, tooltip: &String) -> Result<(), SystrayError> {
         // Add Tooltip
         debug!("Setting tooltip to {}", tooltip);
@@ -339,14 +337,44 @@ impl Window {
         Ok(())
     }
 
+    fn add_icon(&self,icon: HICON) -> Result<(), SystrayError> {
+        unsafe {
+            let mut nid = get_nid_struct(&self.info.hwnd);
+            nid.uID = 0x1;
+            nid.uFlags = winapi::NIF_MESSAGE;
+            nid.hIcon = icon;
+            nid.uCallbackMessage = winapi::WM_USER + 1;
+
+            if Shell_NotifyIconW(winapi::NIM_ADD,
+                                        &mut nid as *mut NOTIFYICONDATAW) == 0 {
+                return Err(get_win_os_error("Error adding menu icon add "));
+            }
+
+            nid.uFlags = winapi::NIF_ICON;
+            nid.hIcon = icon;
+            nid.uCallbackMessage = winapi::WM_USER + 1;
+
+            if Shell_NotifyIconW(winapi::NIM_MODIFY,
+                                        &mut nid as *mut NOTIFYICONDATAW) == 0 {
+                return Err(get_win_os_error("Error adding menu icon modify"));
+            }
+        }
+        Ok(())
+    }
+
     fn set_icon(&self, icon: HICON) -> Result<(), SystrayError> {
+        let _ = self.delete_icon();
+        self.add_icon(icon)
+    }
+
+    pub fn delete_icon(&self) -> Result<(), SystrayError> {
         unsafe {
             let mut nid = get_nid_struct(&self.info.hwnd);
             nid.uFlags = winapi::NIF_ICON;
-            nid.hIcon = icon;
-            if Shell_NotifyIconW(winapi::NIM_MODIFY,
+
+            if Shell_NotifyIconW(winapi::NIM_DELETE,
                                           &mut nid as *mut NOTIFYICONDATAW) == 0 {
-                return Err(get_win_os_error("Error setting icon"));
+                return Err(get_win_os_error("Error deleting icon from menu"));
             }
         }
         Ok(())
@@ -417,15 +445,7 @@ impl Window {
     }
 
     pub fn shutdown(&self) -> Result<(), SystrayError> {
-        unsafe {
-            let mut nid = get_nid_struct(&self.info.hwnd);
-            nid.uFlags = winapi::NIF_ICON;
-            if Shell_NotifyIconW(winapi::NIM_DELETE,
-                                          &mut nid as *mut NOTIFYICONDATAW) == 0 {
-                return Err(get_win_os_error("Error deleting icon from menu"));
-            }
-        }
-        Ok(())
+        self.delete_icon()
     }
 }
 

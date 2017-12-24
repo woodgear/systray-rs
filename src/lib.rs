@@ -19,18 +19,20 @@ extern crate libappindicator;
 
 pub mod api;
 
+use std::sync::mpsc::Sender;
 use std::collections::HashMap;
-use std::sync::mpsc::{channel, Receiver};
 
 #[derive(Clone, Debug)]
 pub enum SystrayError {
     OsError(String),
     NotImplementedError,
     UnknownError,
+    ShowIconWithoutSetError,
 }
 
-pub struct SystrayEvent {
-    menu_index: u32,
+pub enum SystrayEvent{
+    MenuItemClick(u32),
+    LeftButtonClick,
 }
 
 impl std::fmt::Display for SystrayError {
@@ -39,18 +41,35 @@ impl std::fmt::Display for SystrayError {
             &SystrayError::OsError(ref err_str) => write!(f, "OsError: {}", err_str),
             &SystrayError::NotImplementedError => write!(f, "Functionality is not implemented yet"),
             &SystrayError::UnknownError => write!(f, "Unknown error occurrred"),
+            &SystrayError::ShowIconWithoutSetError => write!(f, "want show icon but icon is none"),
+
         }
     }
 }
 
+#[derive(Clone,Debug,PartialEq)]
+pub enum IconResource {
+    File(String),
+    Resource(String),
+}
+
+#[derive(Clone,PartialEq)]
+pub enum IconStatus {
+    SHOW,
+    HIDE,
+}
+
+#[derive(Clone)]
+pub struct TrayIcon {
+    pub status: IconStatus,
+    pub resource: IconResource
+}
+
 pub struct Application {
     window: api::api::Window,
+    icon: Option<TrayIcon>,
     menu_idx: u32,
     callback: HashMap<u32, Callback>,
-    // Each platform-specific window module will set up its own thread for
-    // dealing with the OS main loop. Use this channel for receiving events from
-    // that thread.
-    rx: Receiver<SystrayEvent>,
 }
 
 type Callback = Box<(Fn(&mut Application) -> () + 'static)>;
@@ -61,14 +80,13 @@ fn make_callback<F>(f: F) -> Callback
 }
 
 impl Application {
-    pub fn new() -> Result<Application, SystrayError> {
-        let (event_tx, event_rx) = channel();
+    pub fn new(event_tx:Sender<SystrayEvent>) -> Result<Application, SystrayError> {
         match api::api::Window::new(event_tx) {
             Ok(w) => Ok(Application {
                 window: w,
+                icon: None,
                 menu_idx: 0,
                 callback: HashMap::new(),
-                rx: event_rx
             }),
             Err(e) => Err(e)
         }
@@ -94,16 +112,46 @@ impl Application {
         Ok(idx)
     }
 
-    pub fn set_icon_from_file(&self, file: &String) -> Result<(), SystrayError> {
-        self.window.set_icon_from_file(file)
+    pub fn hide_icon(&mut self) -> Result<(), SystrayError> {
+        self.window.delete_icon()?;
+        if let Some(ref mut icon) = self.icon {
+            icon.status = IconStatus::HIDE;
+        };
+        Ok(())
     }
 
-    pub fn set_icon_from_resource(&self, resource: &String) -> Result<(), SystrayError> {
-        self.window.set_icon_from_resource(resource)
-    }
+    pub fn show_icon(&mut self,icon:IconResource) -> Result<(), SystrayError> {
+        match self.icon {
+            Some(ref mut exist_icon) => {
+                if exist_icon.status == IconStatus::HIDE || exist_icon.resource != icon {
+                    match icon.clone() {
+                        IconResource::File(f) => {
+                            self.window.set_icon_from_file(&f.clone())?;
+                        }
+                        IconResource::Resource(r) => {
+                            self.window.set_icon_from_resource(&r.clone())?;
+                        }
+                    }
 
-    pub fn shutdown(&self) -> Result<(), SystrayError> {
-        self.window.shutdown()
+                    exist_icon.status = IconStatus::SHOW;
+                }
+            },
+            None => {
+                match icon.clone() {
+                    IconResource::File(f) => {
+                        self.window.set_icon_from_file(&f.clone())?;
+                    }
+                    IconResource::Resource(r) => {
+                        self.window.set_icon_from_resource(&r.clone())?;
+                    }
+                }
+                self.icon = Some(TrayIcon {
+                    resource:icon.clone(),
+                    status:IconStatus::SHOW
+                })
+            }
+        };
+        Ok(())
     }
 
     pub fn set_tooltip(&self, tooltip: &String) -> Result<(), SystrayError> {
@@ -111,30 +159,13 @@ impl Application {
     }
 
     pub fn quit(&mut self) {
+        let _ = self.hide_icon();
         self.window.quit()
-    }
-
-    pub fn wait_for_message(&mut self) {
-        loop {
-            let msg;
-            match self.rx.recv() {
-                Ok(m) => msg = m,
-                Err(_) => {
-                    self.quit();
-                    break;
-                }
-            }
-            if self.callback.contains_key(&msg.menu_index) {
-                let f = self.callback.remove(&msg.menu_index).unwrap();
-                f(self);
-                self.callback.insert(msg.menu_index, f);
-            }
-        }
     }
 }
 
 impl Drop for Application {
     fn drop(&mut self) {
-        self.shutdown().ok();
+        self.quit();
     }
 }
