@@ -15,6 +15,7 @@ fn create_tray(control_recviver:Receiver<ControlEvent>,tray_event_sender:Sender<
             Ok(w) => tray = w,
             Err(_) => panic!("Can't create window!")
         }
+        tray.set_tooltip("中文".to_string());
         loop {
             let msg;
             match control_recviver.recv() {
@@ -88,13 +89,8 @@ fn main() {
     loop {
         tray.show();
         thread::sleep(time::Duration::from_secs(5));
-        tray.show();
-        thread::sleep(time::Duration::from_secs(5));
         tray.hide();
         thread::sleep(time::Duration::from_secs(5));
-        tray.hide();
-        thread::sleep(time::Duration::from_secs(5));
-
     }
 
 }

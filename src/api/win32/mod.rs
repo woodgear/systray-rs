@@ -283,11 +283,14 @@ impl Window {
     }
 
     pub fn set_tooltip(&self, tooltip: &String) -> Result<(), SystrayError> {
-        // Add Tooltip
-        debug!("Setting tooltip to {}", tooltip);
-        // Gross way to convert String to [i8; 128]
-        // TODO: Clean up conversion, test for length so we don't panic at runtime
-        let tt = tooltip.as_bytes().clone();
+
+        use widestring::WideCString;
+
+        let wcstr = WideCString::from_str(tooltip)
+        .map_err(|e| SystrayError::SetToolTipError(format!("encode tooltip fail {:?}",e)))?;
+
+        let tt = wcstr.into_vec_with_nul();
+
         let mut nid = get_nid_struct(&self.info.hwnd);
         for i in 0..tt.len() {
             nid.szTip[i] = tt[i] as u16;

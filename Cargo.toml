@@ -11,6 +11,8 @@ keywords = ["gui"]
 
 [dependencies]
 log="0.3"
+encoding = "0.2"
+widestring = "0.2.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi="0.2.8"

@@ -2,6 +2,7 @@
 
 #[macro_use]
 extern crate log;
+
 #[cfg(target_os = "windows")]
 extern crate winapi;
 #[cfg(target_os = "windows")]
@@ -10,6 +11,10 @@ extern crate kernel32;
 extern crate user32;
 #[cfg(target_os = "windows")]
 extern crate libc;
+#[cfg(target_os = "windows")]
+extern crate encoding;
+extern crate widestring;
+
 #[cfg(target_os = "linux")]
 extern crate gtk;
 #[cfg(target_os = "linux")]
@@ -28,6 +33,7 @@ pub enum SystrayError {
     NotImplementedError,
     UnknownError,
     ShowIconWithoutSetError,
+    SetToolTipError(String),
 }
 
 pub enum SystrayEvent{
@@ -42,7 +48,7 @@ impl std::fmt::Display for SystrayError {
             &SystrayError::NotImplementedError => write!(f, "Functionality is not implemented yet"),
             &SystrayError::UnknownError => write!(f, "Unknown error occurrred"),
             &SystrayError::ShowIconWithoutSetError => write!(f, "want show icon but icon is none"),
-
+            &SystrayError::SetToolTipError(ref err_str) => write!(f, "SetToolTipError {}",err_str),
         }
     }
 }
@@ -68,6 +74,7 @@ pub struct TrayIcon {
 pub struct Application {
     window: api::api::Window,
     icon: Option<TrayIcon>,
+    tooltip:String,
     menu_idx: u32,
     callback: HashMap<u32, Callback>,
 }
@@ -85,6 +92,7 @@ impl Application {
             Ok(w) => Ok(Application {
                 window: w,
                 icon: None,
+                tooltip: "".to_string(),
                 menu_idx: 0,
                 callback: HashMap::new(),
             }),
@@ -113,7 +121,7 @@ impl Application {
     }
 
     pub fn hide_icon(&mut self) -> Result<(), SystrayError> {
-        self.window.delete_icon()?;
+        let _ = self.window.delete_icon();
         if let Some(ref mut icon) = self.icon {
             icon.status = IconStatus::HIDE;
         };
@@ -127,9 +135,12 @@ impl Application {
                     match icon.clone() {
                         IconResource::File(f) => {
                             self.window.set_icon_from_file(&f.clone())?;
+                            self.window.set_tooltip(&self.tooltip)?;
                         }
+
                         IconResource::Resource(r) => {
                             self.window.set_icon_from_resource(&r.clone())?;
+                            self.window.set_tooltip(&self.tooltip)?;
                         }
                     }
 
@@ -140,9 +151,11 @@ impl Application {
                 match icon.clone() {
                     IconResource::File(f) => {
                         self.window.set_icon_from_file(&f.clone())?;
+                        self.window.set_tooltip(&self.tooltip)?;
                     }
                     IconResource::Resource(r) => {
                         self.window.set_icon_from_resource(&r.clone())?;
+                        self.window.set_tooltip(&self.tooltip)?;
                     }
                 }
                 self.icon = Some(TrayIcon {
@@ -154,8 +167,9 @@ impl Application {
         Ok(())
     }
 
-    pub fn set_tooltip(&self, tooltip: &String) -> Result<(), SystrayError> {
-        self.window.set_tooltip(tooltip)
+    pub fn set_tooltip(&mut self, tooltip: String) -> Result<(), SystrayError> {
+        self.tooltip = tooltip;
+        Ok(())
     }
 
     pub fn quit(&mut self) {
